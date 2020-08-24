@@ -33,6 +33,10 @@
 #endif
 #endif
 
+typedef enum { CAPTURE_IMAGE,
+		CAPTURE_NO_CAM0,
+		CAPTURE_NO_CAM1} CAPIMAGE_STATE;
+
 
 typedef void* mat_cv;
 #define SECRET_NUM -1234

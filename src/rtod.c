@@ -60,6 +60,19 @@ extern double inter_frame_gap_sum = 0;
 extern double num_object_sum = 0;
 extern double trace_data_sum = 0;
 
+/* device handle */
+static int vdev, vdev0, vdev1;
+extern double failop_start;
+extern double failop_cap;
+extern double dtti;
+double pre_failop;
+double failop_capture;
+double failop_safestate;
+double detected_time;
+double next_diag;
+int diag_check;
+int failop_check;
+
 #ifndef ZERO_SLACK
 int contention_free = 1;
 #endif
@@ -129,9 +142,66 @@ int check_on_demand()
     return on_demand;
 }
 
+void *rtod_diag_thread(void *ptr)
+{
+	double last_diag = 0;
+
+	for(;;) {
+		//usleep(1000 * 50);
+		//CAPIMAGE_STATE ret = capture_image(&frame[buff_index], vdev);
+
+/*   	CAPIMAGE_STATE ret = webcam_connect_state(&frame0[0], vdev);
+        if (ret == CAPTURE_NO_CAM0) {
+			printf("NO_CAM0\n");
+			vdev = vdev1;
+			//capture_image(&frame[buff_index], vdev);
+			//capture_image(&frame0[0], vdev);
+		}
+		else if( ret == CAPTURE_NO_CAM1) {
+			printf("NO_CAM1\n");
+			printf("Stream closed.\n");
+			flag_exit = 1;
+			return 0;
+		}
+
+*/
+
+		
+	    printf("in src/rtod.c : diag_thread : start_time = %lf\n", gettime_after_boot());
+		if(diag_check) {
+			next_diag = gettime_after_boot();
+			diag_check = 0;
+		}
+		CAPIMAGE_STATE ret = capture_image(&frame0[0], vdev);
+        if (ret == CAPTURE_NO_CAM0) {
+			detected_time = gettime_after_boot();
+			pre_failop = last_diag;
+			printf("NO_CAM0\n");
+			vdev = vdev1;
+			//capture_image(&frame[buff_index], vdev);
+			capture_image(&frame0[0], vdev);
+			failop_capture = failop_cap;
+			failop_check = 1;
+			diag_check = 1;
+		}
+		else if( ret == CAPTURE_NO_CAM1) {
+			printf("NO_CAM1\n");
+			printf("Stream closed.\n");
+			flag_exit = 1;
+			return 0;
+		}
+		frame1[0] = frame0[0];
+		last_diag = gettime_after_boot();
+
+    }
+	return 0;
+}
+
 void *rtod_fetch_thread(void *ptr)
 {
     usleep(fetch_offset * 1000);
+
+	//printf("in src/rtod.c : fetch_thread : fetch_offset = %d\n", fetch_offset);  // add
 
     start_fetch = gettime_after_boot();
 
@@ -140,17 +210,58 @@ void *rtod_fetch_thread(void *ptr)
         in_s = get_image_from_stream_letterbox(cap, net.w, net.h, net.c, &in_img, dont_close_stream);
     else{
 #ifdef V4L2
-        frame[buff_index].frame = capture_image(&frame[buff_index]);
-        letterbox_image_into(frame[buff_index].frame, net.w, net.h, frame[buff_index].resize_frame);
-        //frame[buff_index].resize_frame = letterbox_image(frame[buff_index].frame, net.w, net.h);
-        //show_image_cv(frame[buff_index].resize_frame,"im");
+/*			
+		switch (vdev%32) {
+            case 0:
+				CAPIMAGE_STATE ret = capture_image(&frame0[0], vdev0);
+				//frame[buff_index] = frame0[0];
+				break;
+			case 1:
+				CAPIMAGE_STATE ret = capture_image(&frame0[0], vdev1);
+				//frame[buff_index] = frame1[0];
+				break;
+			default:
+				break;
+		}
+*/
+	
+//		capture_image(&frame[buff_index], vdev);
 
-        if(!frame[buff_index].resize_frame.data){
-            printf("Stream closed.\n");
+/*
+		CAPIMAGE_STATE ret = capture_image(&frame[buff_index], vdev);
+        if (ret == CAPTURE_NO_CAM0) {
+			vdev = vdev1;
+			capture_image(&frame[buff_index], vdev);
+		}
+		else if( ret == CAPTURE_NO_CAM1) {
+			printf("Stream closed.\n");
+			flag_exit = 1;
+			return 0;
+		}
+*/
+/*
+        if(!frame[buff_index].frame.data) {
+   		    printf("Stream closed.\n");
+		    // printf("Check frame[buff_index].frame.data\n"); // add
             flag_exit = 1;
             //exit(EXIT_FAILURE);
             return 0;
-        }
+       	}
+*/
+		
+		printf("in src/rtod : rtod_fetch_thread\n");
+		frame[buff_index] = frame1[0];
+        
+		if(failop_check) {
+            failop_safestate = gettime_after_boot();
+			failop_check = 0;
+		}
+
+        letterbox_image_into(frame[buff_index].frame, net.w, net.h, frame[buff_index].resize_frame);
+        //letterbox_image_into(frame0[0].frame, net.w, net.h, frame0[0].resize_frame);
+        //frame[buff_index].resize_frame = letterbox_image(frame[buff_index].frame, net.w, net.h);
+		
+
 #else
         in_s = get_image_from_stream_resize_with_timestamp(cap, net.w, net.h, net.c, &in_img, dont_close_stream, &frame[buff_index]);
         //        in_s = get_image_from_v4l2(net.w, net.h, net.c, &in_img, dont_close_stream, &frame[buff_index]);
@@ -189,6 +300,7 @@ void *rtod_inference_thread(void *ptr)
 #else
     float *X = det_s.data;
 #endif
+	if(!frame[detect_index].resize_frame.data) printf("????????\n");
     float *prediction = network_predict(net, X);
 
     double e_i_cpu = gettime_after_boot();
@@ -222,6 +334,9 @@ void *rtod_inference_thread(void *ptr)
 void *rtod_display_thread(void *ptr)
 {
     int c = show_image_cv(frame[display_index].frame, "Demo");
+// add
+//	int c1 = show_image_cv(frame0[0].frame, "cam0");
+//	int c2 = show_image_cv(frame1[0].frame, "cam1");
 
     if (c == 27 || c == 1048603) // ESC - exit (OpenCV 2.x / 3.x)
     {
@@ -261,13 +376,14 @@ void rtod(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
     char pipeline[2][20] = {"Zero-slack", "Contention free"};
 
     if(filename){
-        printf("video file: %s\n", filename);
+        printf("dsdsdsideo file: %s\n", filename);
         cap = get_capture_video_stream(filename);
     }else{
         printf("Webcam index: %d\n", cam_index);
 #ifdef V4L2
-        char cam_dev[20] = "/dev/video";
         char index[2];
+        char cam_dev[20] = "/dev/video";
+        char cam_dev1[20] = "/dev/video";
         sprintf(index, "%d", cam_index);
         strcat(cam_dev, index);
         printf("cam dev : %s\n", cam_dev);
@@ -275,11 +391,24 @@ void rtod(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
         int frames = 30;
         int w = 640;
         int h = 480;
-        if(open_device(cam_dev, frames, w, h) < 0)
+// cam0
+        if((vdev0 = open_device(cam_dev, frames, w, h)) < 0)
         {
             error("Couldn't connect to webcam.\n");
 
         }
+		
+//  add
+// cam1
+		sprintf(index, "%d", cam_index+1);
+		strcat(cam_dev1, index);
+		if((vdev1 = open_device(cam_dev1, frames, w, h)) < 0)
+        {
+            error("Couldn't connect to webcam.\n");
+
+        }
+		vdev = vdev0;
+
 #else
         cap = get_capture_webcam(cam_index);
 
@@ -308,6 +437,8 @@ void rtod(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
     pthread_t fetch_thread;
     pthread_t inference_thread;
 
+	pthread_t diag_thread;
+
 #ifndef V4L2
     ondemand = check_on_demand();
 
@@ -327,7 +458,8 @@ void rtod(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
     //printf("ondemand : %d\n", ondemand);
 
 #ifdef V4L2
-    frame[0].frame = capture_image(&frame[buff_index]);
+/*
+	frame[0].frame = capture_image(&frame[buff_index], vdev);
     frame[0].resize_frame = letterbox_image(frame[0].frame, net.w, net.h);
 
     frame[1].frame = frame[0].frame;
@@ -335,6 +467,27 @@ void rtod(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
 
     frame[2].frame = frame[0].frame;
     frame[2].resize_frame = letterbox_image(frame[0].frame, net.w, net.h);
+*/
+    //frame[0].frame = capture_image(&frame[buff_index], vdev);
+	capture_image(&frame[buff_index], vdev);
+    frame[0].resize_frame = letterbox_image(frame[0].frame, net.w, net.h);
+
+    frame[1].frame = frame[0].frame;
+    frame[1].resize_frame = letterbox_image(frame[0].frame, net.w, net.h);
+
+    frame[2].frame = frame[0].frame;
+    frame[2].resize_frame = letterbox_image(frame[0].frame, net.w, net.h);
+
+
+// cam failover
+    //frame0[0].frame = capture_image(&frame0[0], vdev0);
+	capture_image(&frame0[0], vdev0);
+    frame0[0].resize_frame = letterbox_image(frame0[0].frame, net.w, net.h);
+
+//	frame1[0].frame = capture_image(&frame0[0], vdev1);
+	capture_image(&frame1[0], vdev1);
+    frame1[0].resize_frame = letterbox_image(frame1[0].frame, net.w, net.h);
+
 
 #else
     rtod_fetch_thread(0);
@@ -389,6 +542,9 @@ void rtod(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
     float avg_fps = 0;
     int frame_counter = 0;
     int measure = 1;
+			
+	
+	pthread_create(&diag_thread, 0, rtod_diag_thread, 0);   // diag
 
     while(1){
         ++count;
@@ -404,6 +560,7 @@ void rtod(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
             const float nms = .45;    // 0.4F
             int local_nboxes = nboxes;
             detection *local_dets = dets;
+
 
             /* Fork fetch thread */
             if (!benchmark) if (pthread_create(&fetch_thread, 0, rtod_fetch_thread, 0)) error("Thread creation failed");
@@ -679,6 +836,21 @@ void rtod(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
     }
     cnt = 0;
 
+	pthread_cancel(diag_thread);
+
+	printf("============ Failop. ============\n");
+	printf("              dtti (ms) : %0.2lf\n", dtti);
+	printf("        pre_failop (ms) : %0.2lf\n", pre_failop);
+	printf("      failop_start (ms) : %0.2lf\n", failop_start);
+	printf("     detected_time (ms) : %0.2lf\n", detected_time);
+	printf("         next_diag (ms) : %0.2lf\n", next_diag);
+	printf("  failop_safestate (ms) : %0.2lf\n", failop_safestate);
+	printf("   (measure) FDTI : %0.2lf\n", dtti+detected_time-failop_start);
+	printf("           FRTI 1 : %0.2lf\n", next_diag-detected_time);
+	printf(" (measure) FHTI 1 : %0.2lf\n", dtti+detected_time-failop_start+next_diag-detected_time);
+	printf("           FRTI 2 : %0.2lf\n", failop_safestate-detected_time);
+	printf(" (measure) FHTI 2 : %0.2lf\n", dtti+detected_time-failop_start+failop_safestate-detected_time);
+
 #ifdef MEASUREMENT
     /* Average data */
     printf("============ Darknet data ===========\n");
@@ -719,12 +891,12 @@ void rtod(char *cfgfile, char *weightfile, float thresh, float hier_thresh, int 
     //printf("3.2\n");
     for (j = 0; j < NFRAMES; ++j) {
         release_mat(&cv_images[j]);
-        printf("j = %d\n", j);
-        printf("NAFRAMES = %d\n", NFRAMES);
+        //printf("j = %d\n", j);
+        //printf("NAFRAMES = %d\n", NFRAMES);
     }
-    printf("4\n");
+    //printf("4\n");
     free_ptrs((void **)names, net.layers[net.n - 1].classes);
-    printf("5\n");
+    //printf("5\n");
     int i;
     const int nsize = 8;
     for (j = 0; j < nsize; ++j) {

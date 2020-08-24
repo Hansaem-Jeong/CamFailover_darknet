@@ -29,18 +29,9 @@
 //#define MJPEG 
 #define YUYV 
 
-#define DEBUG
-//#define BUSY_WAITING
-
 int fd;
-int temp_fd[2];
 //fd_set fds;
 struct timeval tv = {0};
-
-// 
-double failop_start;
-double failop_cap;
-double dtti;
 
 volatile static int ret_select = -1;
 
@@ -199,6 +190,7 @@ extern "C" {
         struct v4l2_buffer buf = {0};
         struct v4l2_requestbuffers req = {0};
 
+        int ret;
 
         req.count = DEFAULT_V4L_QLEN;
         req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -225,8 +217,7 @@ extern "C" {
             buf.memory = V4L2_MEMORY_MMAP;
             buf.index = i;
 
-            //ret = ioctl(fd, VIDIOC_QUERYBUF, &buf);
-            ioctl(fd, VIDIOC_QUERYBUF, &buf);
+            ret = ioctl(fd, VIDIOC_QUERYBUF, &buf);
 
             buffers[fd%32][i].start = mmap(NULL, buf.length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, buf.m.offset);
 
@@ -260,53 +251,18 @@ extern "C" {
 
         return 1;
     }
-    CAPIMAGE_STATE webcam_connect_state(struct frame_data *f, int num_dev)
-    {
-        struct v4l2_buffer buf;
-        enum v4l2_buf_type type;
-        pthread_t select_thread;
-		image im;
-		CAPIMAGE_STATE ret = CAPTURE_IMAGE;
-
-		int cam_id = 0;
-
-
-		cam_id = temp_fd[num_dev%32];
-        memset(&buf, 0x00, sizeof(struct v4l2_buffer));
-        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        buf.memory = V4L2_MEMORY_MMAP;
-
-        type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-
-        if(-1 == xioctl(cam_id, VIDIOC_STREAMON, &buf.type))
-        {
-            perror("Start Capture");
-			//return make_empty_image(0,0,0);
-			//f->frame = make_empty_image(0,0,0);
-			f->frame = make_empty_image(0,0,0);
-			if (cam_id == temp_fd[0]) return CAPTURE_NO_CAM0;
-			else return CAPTURE_NO_CAM1;
-        }
-        return CAPTURE_IMAGE; /* return Image as darknet image type */
-    }
 
     /* Capture */
-    //image capture_image(struct frame_data *f, int num_dev)
+    image capture_image(struct frame_data *f, int num_dev)
     //image capture_image(struct frame_data *f)
-	CAPIMAGE_STATE capture_image(struct frame_data *f, int num_dev)
     {
         struct v4l2_buffer buf;
         enum v4l2_buf_type type;
         pthread_t select_thread;
 		image im;
-		CAPIMAGE_STATE ret = CAPTURE_IMAGE;
-
-		static double qbuf_time = 0;
-		static double dqbuf_time = 0;
-		static double streamon_time = 0;
 
 
-		fd = temp_fd[num_dev%32];
+		fd = num_dev;
         memset(&buf, 0x00, sizeof(struct v4l2_buffer));
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         buf.memory = V4L2_MEMORY_MMAP;
@@ -316,15 +272,8 @@ extern "C" {
         if(-1 == xioctl(fd, VIDIOC_STREAMON, &buf.type))
         {
             perror("Start Capture");
-			//return make_empty_image(0,0,0);
-			//f->frame = make_empty_image(0,0,0);
-			f->frame = make_empty_image(0,0,0);
-			failop_start = gettime_after_boot();
-			dtti = failop_start - dqbuf_time;
-			if (fd == temp_fd[0]) return CAPTURE_NO_CAM0;
-			else return CAPTURE_NO_CAM1;
+			return make_empty_image(0,0,0);
         }
-		streamon_time = gettime_after_boot();
 
 		//printf("in src/v4l2.cpp : fd = %d\n", fd);  // add
         /* On demand capture */
@@ -332,26 +281,12 @@ extern "C" {
         if(-1 == xioctl(fd, VIDIOC_QBUF, &buf))
         {
             perror("Query Buffer");
-			//return make_empty_image(0,0,0);
-			f->frame = make_empty_image(0,0,0);
-			failop_start = gettime_after_boot();
-			dtti = failop_start - streamon_time;
-            if (fd == temp_fd[0]) return CAPTURE_NO_CAM0;
-			else return CAPTURE_NO_CAM1;
+			return make_empty_image(0,0,0);
+
+			//printf("In v4l2.cpp VIDIOC_QBUF\n"); // add
 			//return -1;   // add
         }
-		qbuf_time = gettime_after_boot();
-		/*
-        if(-1 == xioctl(fd, VIDIOC_STREAMON, &buf.type))
-        {
-            perror("Start Capture");
-			//return make_empty_image(0,0,0);
-			//f->frame = make_empty_image(0,0,0);
-			f->frame = make_empty_image(0,0,0);
-			if (fd == temp_fd[0]) return CAPTURE_NO_CAM0;
-			else return CAPTURE_NO_CAM1;
-        }
-*/
+
         fd_set fds;  // add
         FD_ZERO(&fds);
         FD_SET(fd, &fds);
@@ -369,24 +304,15 @@ extern "C" {
 
         f->select = gettime_after_boot() - select_start;
 
-
         if(-1 == xioctl(fd, VIDIOC_DQBUF, &buf))
         {
             perror("Retrieving Frame");
-			//return make_empty_image(0,0,0);
-			f->frame = make_empty_image(0,0,0);
-			failop_start = gettime_after_boot();
-			dtti = failop_start - qbuf_time;
-            if (fd == temp_fd[0]) return CAPTURE_NO_CAM0;
-			else return CAPTURE_NO_CAM1;
-
+			//printf("In v4l2.cpp VIDIOC_DQBUF\n"); // add
 			//return make_empty_image(0,0,0); // add
 
 
 			//return -1; // add
         }
-		dqbuf_time = gettime_after_boot();
-		failop_cap = gettime_after_boot();
 
         /* Load frame data */
 
@@ -405,7 +331,7 @@ extern "C" {
                 buf.index, buf.length, buf.flags, buf.sequence, buf.bytesused);
 
         printf("image capture time : %f\n", buf.timestamp.tv_sec*1000+(double)buf.timestamp.tv_usec*0.001);
-        printf("select time : %f\n", f->select); //select_time);
+        printf("select time : %f\n", select_time);
         printf("frame timestamp : %f\n", f->frame_timestamp);
         printf("frame sequence : %d\n", f->frame_sequence);
 #endif
@@ -432,8 +358,7 @@ extern "C" {
 
         im = matImg_to_image(preview);
 #endif
-		f->frame = im;
-        return CAPTURE_IMAGE; /* return Image as darknet image type */
+        return im; /* return Image as darknet image type */
     }
 
     /* Check Q size defined in environment variable */
@@ -488,11 +413,8 @@ extern "C" {
     int open_device(char *cam_dev, int fps, int w, int h)
     {
         int ret;
-		static int cnt=0;
 
-        temp_fd[cnt] = open(cam_dev, O_RDWR | O_NONBLOCK, 0);
-		//printf("in src/v4l2.cpp : open_device : temp[cnt] = %d\n", temp_fd[cnt]);
-		fd = temp_fd[cnt];
+        fd = open(cam_dev, O_RDWR | O_NONBLOCK, 0);
 
         if (fd == -1)
         {
@@ -515,9 +437,10 @@ extern "C" {
         }
 
 		/* return device handle */
-		cnt++;
 		ret = fd;
 		return ret;
         //return 1;
     }
 }
+
+

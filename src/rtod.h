@@ -12,7 +12,7 @@
 /* Measurement */
 #define MEASUREMENT_PATH "measure"
 #define MEASUREMENT_FILE "/measure.csv"
-#define OBJ_DET_CYCLE_IDX 1000
+#define OBJ_DET_CYCLE_IDX 100
 
 #define QLEN 4
 #define NFRAMES 3
@@ -35,6 +35,10 @@ extern "C" {
 #endif
 
 struct frame_data frame[3]; // v4l2 image data
+
+// add for cam_failover
+struct frame_data frame0[1];
+struct frame_data frame1[1];
 
 double e_fetch_array[OBJ_DET_CYCLE_IDX];
 double b_fetch_array[OBJ_DET_CYCLE_IDX];

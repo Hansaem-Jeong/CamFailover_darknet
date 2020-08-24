@@ -837,7 +837,10 @@ extern "C" {
         else
             src = (cv::Mat*)get_capture_frame_cv(cap);
 
-        if (!wait_for_stream(cap, src, dont_close)) return make_empty_image(0, 0, 0);
+        if (!wait_for_stream(cap, src, dont_close)) {
+			printf("In image_opencv.cpp : get_image_from_stream_resize\n");
+			return make_empty_image(0, 0, 0);
+		}
 
         *(cv::Mat **)in_img = src;
 

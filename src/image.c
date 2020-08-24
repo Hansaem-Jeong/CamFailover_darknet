@@ -676,6 +676,9 @@ void embed_image(image source, image dest, int dx, int dy)
             }
         }
     }
+	// add
+	//printf("in embed_imag : c = %d, w = %d, h = %d \n", source.c, source.w, source.h);
+    //if(!dest.data)	printf("iiiii at sal la mal la i kum\n");
 }
 
 image collapse_image_layers(image source, int border)
@@ -1054,7 +1057,7 @@ void letterbox_image_into(image im, int w, int h, image boxed)
 {
     int new_w = im.w;
     int new_h = im.h;
-	//show_image_cv(im, "test");
+//	show_image_cv(im, "test");
 	//printf("image w, h : %d, %d\n", im.w, im.h);
 //    if (((float)w / im.w) < ((float)h / im.h)) {
 //        new_w = w;
@@ -1069,7 +1072,11 @@ void letterbox_image_into(image im, int w, int h, image boxed)
 	new_h = h;
 	new_w = w;
     image resized = resize_image(im, new_w, new_h);
+	//add
+	//printf("in letterbox_image_into : w = %d, h = %d\n", new_w, new_h);
+	//if(!resized.data) printf("in letterbox_image_into : resized check\n");
     embed_image(resized, boxed, (w - new_w) / 2, (h - new_h) / 2);
+	//if(!boxed.data) printf("in letterbox_image_into : boxed check\n");
     free_image(resized);
 }
 
